@@ -4,7 +4,17 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Main {
     public static void main(String[] args) throws IOException {
@@ -16,14 +26,13 @@ public class Main {
                 return;
             }
 
-            String response = "{"
-                    + "\"code\":1000,"
-                    + "\"result\":["
-                    + "{\"id\":\"012\",\"username\":\"trongphat012\",\"fullname\":\"trongphat\",\"email\":\"trongphat@gmail.com\",\"roles\":[{\"name\":\"USER\",\"description\":\"The user is using the system\"}]},"
-                    + "{\"id\":\"123\",\"username\":\"Biz7\",\"fullname\":\"TaCanh\",\"email\":\"tacanh@gmail.com\",\"roles\":[{\"name\":\"ADMIN\",\"description\":\"The admin is managing the system\"}]}"
-                    + "]"
-                    + "}";
-            sendResponse(exchange, 200, "application/json; charset=UTF-8", response);
+            try {
+                String response = "{\"code\":1000,\"result\":" + fetchUsersJson() + "}";
+                sendResponse(exchange, 200, "application/json; charset=UTF-8", response);
+            } catch (Exception ex) {
+                String error = "{\"code\":500,\"message\":\"" + escapeJson(ex.getMessage()) + "\"}";
+                sendResponse(exchange, 500, "application/json; charset=UTF-8", error);
+            }
         });
         server.createContext("/v3/api-docs", exchange -> {
             if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
@@ -103,6 +112,94 @@ public class Main {
         exchange.sendResponseHeaders(statusCode, body.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(body);
+        }
+    }
+
+    private static String fetchUsersJson() throws SQLException, URISyntaxException {
+        String databaseUrl = System.getenv("DATABASE_URL");
+        if (databaseUrl == null || databaseUrl.isBlank()) {
+            throw new IllegalStateException("DATABASE_URL is missing");
+        }
+
+        ConnectionInfo connectionInfo = parseDatabaseUrl(databaseUrl);
+        List<String> rows = new ArrayList<>();
+
+        try (Connection connection = DriverManager.getConnection(connectionInfo.jdbcUrl, connectionInfo.username, connectionInfo.password);
+             Statement statement = connection.createStatement();
+             ResultSet rs = statement.executeQuery("SELECT * FROM users LIMIT 100")) {
+
+            ResultSetMetaData md = rs.getMetaData();
+            int columns = md.getColumnCount();
+            List<String> columnNames = new ArrayList<>();
+            for (int i = 1; i <= columns; i++) {
+                columnNames.add(md.getColumnLabel(i).toLowerCase());
+            }
+
+            while (rs.next()) {
+                String id = valueFrom(rs, columnNames, "id");
+                String username = valueFrom(rs, columnNames, "username");
+                String fullname = valueFrom(rs, columnNames, "fullname", "full_name", "name");
+                String email = valueFrom(rs, columnNames, "email");
+
+                String row = "{"
+                        + "\"id\":\"" + escapeJson(id) + "\","
+                        + "\"username\":\"" + escapeJson(username) + "\","
+                        + "\"fullname\":\"" + escapeJson(fullname) + "\","
+                        + "\"email\":\"" + escapeJson(email) + "\","
+                        + "\"roles\":[]"
+                        + "}";
+                rows.add(row);
+            }
+        }
+
+        return "[" + String.join(",", rows) + "]";
+    }
+
+    private static String valueFrom(ResultSet rs, List<String> columns, String... candidates) throws SQLException {
+        for (String candidate : candidates) {
+            for (String column : columns) {
+                if (column.equalsIgnoreCase(candidate)) {
+                    String value = rs.getString(column);
+                    return value == null ? "" : value;
+                }
+            }
+        }
+        return "";
+    }
+
+    private static ConnectionInfo parseDatabaseUrl(String databaseUrl) throws URISyntaxException {
+        URI uri = new URI(databaseUrl);
+        String[] userInfo = uri.getUserInfo().split(":", 2);
+        String username = userInfo[0];
+        String password = userInfo.length > 1 ? userInfo[1] : "";
+        String host = uri.getHost();
+        int port = uri.getPort();
+        String database = uri.getPath().replaceFirst("/", "");
+        String jdbcUrl = "jdbc:mysql://" + host + ":" + port + "/" + database
+                + "?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC";
+        return new ConnectionInfo(jdbcUrl, username, password);
+    }
+
+    private static String escapeJson(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r");
+    }
+
+    private static class ConnectionInfo {
+        private final String jdbcUrl;
+        private final String username;
+        private final String password;
+
+        private ConnectionInfo(String jdbcUrl, String username, String password) {
+            this.jdbcUrl = jdbcUrl;
+            this.username = username;
+            this.password = password;
         }
     }
 }
