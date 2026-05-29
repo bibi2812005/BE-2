@@ -1,5 +1,5 @@
 services:
   - type: web
     name: BE-2
-    env: docker
-    dockerfilePath: Dockerfile
+    runtime: docker
+    dockerfilePath: ./Dockerfile
