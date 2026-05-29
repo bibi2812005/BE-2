@@ -10,15 +10,21 @@ public class Main {
     public static void main(String[] args) throws IOException {
         int port = getPort();
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/", exchange -> {
-            String response = "Hello from Render Java!";
-            byte[] body = response.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=UTF-8");
-            exchange.sendResponseHeaders(200, body.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(body);
+        server.createContext("/users", exchange -> {
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                sendResponse(exchange, 405, "text/plain; charset=UTF-8", "Method Not Allowed");
+                return;
             }
+
+            String response = "[{\"id\":1,\"name\":\"Thang Duong\"},{\"id\":2,\"name\":\"Anna Nguyen\"},{\"id\":3,\"name\":\"Minh Tran\"}]";
+            sendResponse(exchange, 200, "application/json; charset=UTF-8", response);
         });
+        server.createContext("/", exchange -> sendResponse(
+                exchange,
+                200,
+                "text/plain; charset=UTF-8",
+                "Hello from Render Java!"
+        ));
         server.setExecutor(null);
         server.start();
 
@@ -34,5 +40,14 @@ public class Main {
             }
         }
         return 10000;
+    }
+
+    private static void sendResponse(com.sun.net.httpserver.HttpExchange exchange, int statusCode, String contentType, String response) throws IOException {
+        byte[] body = response.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", contentType);
+        exchange.sendResponseHeaders(statusCode, body.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(body);
+        }
     }
 }
