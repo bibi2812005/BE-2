@@ -1,6 +1,5 @@
 services:
   - type: web
     name: BE-2
-    env: java
-    buildCommand: mvn package
-    startCommand: java -cp target/classes com.thangduong.shop.Main
+    env: docker
+    dockerfilePath: Dockerfile
